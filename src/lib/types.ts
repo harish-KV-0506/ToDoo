@@ -36,6 +36,33 @@ export type WorkspaceInvitation = {
   created_at: string
 }
 
+export type ProfessionalProfile = {
+  user_id: string
+  display_name: string
+  headline: string | null
+  bio: string | null
+  location: string | null
+  portfolio_url: string | null
+  created_at: string
+}
+
+export type WorkPost = {
+  id: string
+  author_id: string
+  content: string
+  project_url: string | null
+  created_at: string
+}
+
+export type ProfessionalConnection = {
+  id: string
+  requester_id: string
+  addressee_id: string
+  status: 'pending' | 'accepted'
+  created_at: string
+  updated_at: string
+}
+
 type Table<Row, Insert, Update = Partial<Insert>> = {
   Row: Row
   Insert: Insert
@@ -47,9 +74,9 @@ type Database = {
   public: {
     Tables: {
       profiles: Table<
-        { user_id: string; display_name: string; created_at: string },
-        { user_id: string; display_name: string; created_at?: string },
-        { display_name?: string }
+        ProfessionalProfile,
+        Omit<ProfessionalProfile, 'created_at'> & { created_at?: string },
+        Partial<Omit<ProfessionalProfile, 'user_id' | 'created_at'>>
       >
       workspaces: Table<Workspace, never, never>
       workspace_members: Table<
@@ -63,6 +90,16 @@ type Database = {
         never
       >
       tasks: Table<Task, Omit<Task, 'id' | 'created_at' | 'updated_at'> & { id?: string; created_at?: string; updated_at?: string }>
+      work_posts: Table<
+        WorkPost,
+        Omit<WorkPost, 'id' | 'created_at'> & { id?: string; created_at?: string },
+        Partial<Omit<WorkPost, 'id' | 'author_id' | 'created_at'>>
+      >
+      professional_connections: Table<
+        ProfessionalConnection,
+        Omit<ProfessionalConnection, 'id' | 'created_at' | 'updated_at'> & { id?: string; created_at?: string; updated_at?: string },
+        Partial<Pick<ProfessionalConnection, 'status'>>
+      >
     }
     Views: Record<string, never>
     Functions: {

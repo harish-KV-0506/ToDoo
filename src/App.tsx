@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   Circle,
   Clipboard,
+  BriefcaseBusiness,
   Clock3,
   Flag,
   LayoutGrid,
@@ -26,9 +27,11 @@ import {
 } from 'lucide-react'
 import { getSupabaseClient, isSupabaseConfigured, supabaseConfigIssue } from './lib/supabase'
 import type { Task, TaskPriority, TaskStatus, Workspace, WorkspaceInvitation, WorkspaceMember } from './lib/types'
+import ProfessionalNetwork from './ProfessionalNetwork'
 import './App.css'
 
 type Filter = 'all' | 'mine' | 'today' | 'upcoming' | 'completed'
+type Area = 'tasks' | 'network'
 
 const filters: { id: Filter; label: string; icon: typeof LayoutGrid }[] = [
   { id: 'all', label: 'All tasks', icon: LayoutGrid },
@@ -75,6 +78,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [workspaceList, setWorkspaceList] = useState<Workspace[]>([])
   const [workspaceId, setWorkspaceId] = useState('')
+  const [activeArea, setActiveArea] = useState<Area>('tasks')
   const [workspaceName, setWorkspaceName] = useState('')
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -110,6 +114,7 @@ function App() {
     if (ids.length === 0) {
       setWorkspaceList([])
       setWorkspaceId('')
+      setActiveArea('tasks')
       setWorkspaceName('')
       return
     }
@@ -499,9 +504,23 @@ function App() {
   }
 
   if (workspaceList.length === 0) {
+    if (activeArea === 'network') {
+      return (
+        <main className="network-standalone">
+          <header className="network-standalone-header">
+            <Brand />
+            <div>
+              <button className="quiet-button" onClick={() => setActiveArea('tasks')}><ListTodo size={16} /> Create a board</button>
+              <button className="quiet-button" onClick={signOut}><LogOut size={16} /> Sign out</button>
+            </div>
+          </header>
+          <ProfessionalNetwork key={user.id} supabase={supabase!} user={user} />
+        </main>
+      )
+    }
     return (
       <main className="onboarding-page">
-        <header className="onboarding-top"><Brand /><button className="quiet-button" onClick={signOut}><LogOut size={16} /> Sign out</button></header>
+        <header className="onboarding-top"><Brand /><div className="onboarding-actions"><button className="quiet-button" onClick={() => setActiveArea('network')}><BriefcaseBusiness size={15} /> Explore professionals</button><button className="quiet-button" onClick={signOut}><LogOut size={16} /> Sign out</button></div></header>
         <section className="onboarding-card">
           <div className="onboarding-art"><span className="art-sparkle art-sparkle-one">✳</span><span className="art-card art-card-back" /><span className="art-card art-card-mid" /><span className="art-card art-card-front"><Check size={26} /></span><span className="art-sparkle art-sparkle-two">✦</span></div>
           <p className="eyebrow">Your first little win</p>
@@ -533,14 +552,17 @@ function App() {
           )}
         </div>
         <span className="sidebar-label">YOUR SPACE</span>
-        <nav className="sidebar-nav" aria-label="Task filters">
+        <nav className="sidebar-nav" aria-label="Task filters and professional network">
           {filters.map(({ id, label, icon: Icon }) => (
-            <button className={`sidebar-link ${filter === id ? 'sidebar-link-active' : ''}`} key={id} onClick={() => setFilter(id)} aria-label={label} aria-current={filter === id ? 'page' : undefined}>
+            <button className={`sidebar-link ${activeArea === 'tasks' && filter === id ? 'sidebar-link-active' : ''}`} key={id} onClick={() => { setActiveArea('tasks'); setFilter(id) }} aria-label={label} aria-current={activeArea === 'tasks' && filter === id ? 'page' : undefined}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
               {id === 'all' && <small className="nav-count">{openCount}</small>}
               {id === 'completed' && <small className="nav-count">{completeCount}</small>}
             </button>
           ))}
+          <button className={`sidebar-link ${activeArea === 'network' ? 'sidebar-link-active' : ''}`} onClick={() => setActiveArea('network')} aria-label="Professional network" aria-current={activeArea === 'network' ? 'page' : undefined}>
+            <BriefcaseBusiness size={18} strokeWidth={1.8} /><span>Professional network</span>
+          </button>
         </nav>
         <button className="invite-sidebar" onClick={() => setShowInvite(true)}><MailPlus size={17} /> Invite a teammate</button>
         <div className="sidebar-bottom">
@@ -560,15 +582,16 @@ function App() {
       <main className="main-panel">
         <header className="topbar">
           <div className="mobile-brand"><Brand /></div>
-          <div className="breadcrumb"><span>{workspaceName || 'Your board'}</span><span className="breadcrumb-slash">/</span><strong>{filters.find((item) => item.id === filter)?.label}</strong></div>
+          <div className="breadcrumb"><span>{activeArea === 'network' ? 'ToDoo community' : workspaceName || 'Your board'}</span><span className="breadcrumb-slash">/</span><strong>{activeArea === 'network' ? 'Professional network' : filters.find((item) => item.id === filter)?.label}</strong></div>
           <div className="topbar-actions">
-            <span className={`live-indicator ${realtimeConnected ? 'live-indicator-on' : ''}`}><i />{realtimeConnected ? 'Live' : 'Connecting'}</span>
-            <button className="member-pill" onClick={() => setShowInvite(true)}><Users size={15} /><span>{members.length}</span><Plus size={15} /></button>
+            {activeArea === 'tasks' && <><span className={`live-indicator ${realtimeConnected ? 'live-indicator-on' : ''}`}><i />{realtimeConnected ? 'Live' : 'Connecting'}</span><button className="member-pill" onClick={() => setShowInvite(true)}><Users size={15} /><span>{members.length}</span><Plus size={15} /></button></>}
             <button className="topbar-avatar" aria-label="Account settings">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
           </div>
         </header>
 
-        <section className="board-content">
+        {activeArea === 'network' ? (
+          <ProfessionalNetwork key={user.id} supabase={supabase!} user={user} />
+        ) : <section className="board-content">
           <div className="board-heading">
             <div className="board-heading-copy">
               <p className="eyebrow"><Sparkles size={13} /> A calmer way to get things done</p>
@@ -644,7 +667,7 @@ function App() {
           )}
 
           <div className="board-bottom"><span><RefreshCw size={12} /> Changes sync with your team</span><button onClick={() => setShowInvite(true)}>Share this board <ArrowUpRight size={13} /></button></div>
-        </section>
+        </section>}
       </main>
 
       {showInvite && (
