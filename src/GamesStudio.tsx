@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { User } from '@supabase/supabase-js'
-import { Code2, Gamepad2, Pencil, Play, Plus, Search, Sparkles, Trash2, Upload, X } from 'lucide-react'
+import { Code2, Copy, Gamepad2, MessageCircle, Pencil, Play, Plus, Search, Sparkles, Trash2, Upload, X } from 'lucide-react'
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { CommunityGame, Database, GameActivity, GameGenre } from './lib/types'
 
@@ -117,8 +117,17 @@ export default function GamesStudio({ supabase, user }: Props) {
     if (profilesResult.error) throw profilesResult.error
     if (activityResult.error) throw activityResult.error
 
+    const authorIds = [...new Set(gamesResult.data.map((game) => game.author_id))]
+    const missingAuthorIds = authorIds.filter((id) => !profilesResult.data.some((profile) => profile.user_id === id))
+    const missingAuthorsResult = missingAuthorIds.length
+      ? await supabase.from('profiles').select('user_id, display_name').in('user_id', missingAuthorIds)
+      : { data: [], error: null }
+    if (missingAuthorsResult.error) throw missingAuthorsResult.error
+
     setGames(gamesResult.data)
-    setAuthors(Object.fromEntries(profilesResult.data.map((profile) => [profile.user_id, profile.display_name])))
+    const sharedGameId = new URLSearchParams(window.location.search).get('game')
+    if (sharedGameId && gamesResult.data.some((game) => game.id === sharedGameId)) setPlayingId(sharedGameId)
+    setAuthors(Object.fromEntries([...profilesResult.data, ...missingAuthorsResult.data].map((profile) => [profile.user_id, profile.display_name])))
     setActivity(activityResult.data)
     setLoading(false)
   }, [supabase, user.id])
@@ -254,12 +263,33 @@ export default function GamesStudio({ supabase, user }: Props) {
 
   const playGame = async (game: CommunityGame) => {
     setPlayingId(game.id)
+    const url = new URL(window.location.href)
+    url.searchParams.set('area', 'games')
+    url.searchParams.set('game', game.id)
+    window.history.replaceState({}, '', url)
     setError('')
     setNotice('')
     try {
       await recordActivity('played')
     } catch (activityError) {
       setError(`The game is open, but your play streak could not be updated: ${(activityError as Error).message}`)
+    }
+  }
+
+  const gameUrl = (game: CommunityGame) => {
+    const url = new URL(window.location.href)
+    url.searchParams.set('area', 'games')
+    url.searchParams.set('game', game.id)
+    return url.toString()
+  }
+
+  const shareGame = async (game: CommunityGame) => {
+    try {
+      await navigator.clipboard.writeText(gameUrl(game))
+      setNotice(`Link to ${game.title} copied. Created by ${authors[game.author_id] ?? 'a ToDoo member'}.`)
+      setError('')
+    } catch (copyError) {
+      setError(`Could not copy the game link: ${(copyError as Error).message}`)
     }
   }
 
@@ -306,8 +336,14 @@ export default function GamesStudio({ supabase, user }: Props) {
         <section className="game-player-card" aria-label={`${playingGame.title} game player`}>
           <div className="network-section-heading">
             <div><p className="eyebrow"><Gamepad2 size={13} /> Now playing</p><h2>{playingGame.title}</h2></div>
-            <button className="quiet-button" onClick={() => setPlayingId(null)}><X size={15} /> Close game</button>
+            <button className="quiet-button" onClick={() => {
+              setPlayingId(null)
+              const url = new URL(window.location.href)
+              url.searchParams.delete('game')
+              window.history.replaceState({}, '', url)
+            }}><X size={15} /> Close game</button>
           </div>
+          <p className="game-player-credit">Created by {authors[playingGame.author_id] ?? 'ToDoo member'} <span>· Creator credit stays with the game wherever it is shared.</span></p>
           <iframe
             className="game-frame"
             title={`${playingGame.title} by ${authors[playingGame.author_id] ?? 'ToDoo member'}`}
@@ -338,13 +374,20 @@ export default function GamesStudio({ supabase, user }: Props) {
                 <span className="game-genre">{genres.find((item) => item.value === game.genre)?.label ?? 'Other'}</span>
                 <h3>{game.title}</h3>
                 <p>{game.description}</p>
-                <small>By {authors[game.author_id] ?? 'ToDoo member'} · {new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(game.created_at))}</small>
+                <div className="game-creator-credit"><Code2 size={13} /> Created by {authors[game.author_id] ?? 'ToDoo member'}</div>
+                <small>Published {new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(game.created_at))}</small>
                 <div className="game-card-actions">
                   <button className="primary-button" onClick={() => void playGame(game)}><Play size={14} /> Play</button>
                   {game.author_id === user.id && <>
                     <button className="icon-quiet" onClick={() => startEditing(game)} aria-label={`Edit ${game.title}`}><Pencil size={15} /></button>
                     <button className="icon-quiet" onClick={() => void deleteGame(game)} aria-label={`Delete ${game.title}`}><Trash2 size={15} /></button>
                   </>}
+                </div>
+                <div className="game-share-actions" aria-label={`Share ${game.title}`}>
+                  <a href={`https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(gameUrl(game))}`} target="_blank" rel="noreferrer" aria-label={`Share ${game.title} on LinkedIn`}><span className="game-share-linkedin-mark">in</span> LinkedIn</a>
+                  <a href={`https://twitter.com/intent/tweet?text=${encodeURIComponent(`Try ${game.title}, created by ${authors[game.author_id] ?? 'a ToDoo member'} on ToDoo`)}&url=${encodeURIComponent(gameUrl(game))}`} target="_blank" rel="noreferrer" aria-label={`Share ${game.title} on X`}>X</a>
+                  <a href={`https://wa.me/?text=${encodeURIComponent(`Try ${game.title}, created by ${authors[game.author_id] ?? 'a ToDoo member'} on ToDoo: ${gameUrl(game)}`)}`} target="_blank" rel="noreferrer" aria-label={`Share ${game.title} on WhatsApp`}><MessageCircle size={13} /> WhatsApp</a>
+                  <button type="button" onClick={() => void shareGame(game)} aria-label={`Copy link to ${game.title}`}><Copy size={13} /> Copy link</button>
                 </div>
               </article>
             ))}

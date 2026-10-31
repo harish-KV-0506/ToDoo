@@ -6,7 +6,14 @@ button { border: 0; cursor: pointer; }
 }
 .brand-mark {
   display: grid; width: 29px; height: 29px; place-items: center; border-radius: 9px 9px 9px 3px;
-  color: white; background: var(--accent); transform: rotate(-4deg);
+  color: white; background: var(--accent); transform: rotate(-4deg); transform-style: preserve-3d;
+  animation: todoo-logo-float 5.2s ease-in-out infinite; transition: filter .2s ease, scale .2s ease;
+}
+.brand:hover .brand-mark { filter: drop-shadow(0 5px 5px #64764f55); scale: 1.08; }
+@keyframes todoo-logo-float {
+  0%, 78%, 100% { transform: perspective(300px) rotateY(0) rotate(-4deg) translateY(0); }
+  86% { transform: perspective(300px) rotateY(180deg) rotate(-4deg) translateY(-2px); }
+  94% { transform: perspective(300px) rotateY(360deg) rotate(-4deg) translateY(0); }
 }
 .brand-period { color: var(--terracotta); }
 .eyebrow {
@@ -151,6 +158,8 @@ button { border: 0; cursor: pointer; }
 .member-pill { display: flex; height: 30px; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; color: #68685e; background: white; font-size: 10px; }
 .member-pill:hover { border-color: #cfd7c6; }
 .topbar-avatar { width: 30px; height: 30px; border: 2px solid white; box-shadow: 0 0 0 1px var(--line); }
+.topbar-avatar { overflow: hidden; padding: 0; }
+.topbar-avatar img { width: 100%; height: 100%; border-radius: inherit; object-fit: cover; }
 .topbar-avatar { cursor: pointer; }
 .topbar-avatar { transition: transform .18s ease, box-shadow .18s ease; }
 .topbar-avatar:hover { box-shadow: 0 0 0 2px #cfd7c6; transform: translateY(-1px) scale(1.04); }
@@ -445,8 +454,14 @@ button { border: 0; cursor: pointer; }
 .games-heading .board-subtitle { max-width: 560px; margin: 9px 0 0; }
 .games-streaks { display: flex; flex: 0 0 auto; gap: 8px; }
 .games-streaks > span { display: grid; min-width: 99px; grid-template-columns: 19px 1fr; align-items: center; gap: 1px 5px; padding: 9px 10px; border: 1px solid #e8e9df; border-radius: 9px; color: #77876a; background: #fff; }
-.games-streaks strong { color: #484b3e; font-size: 15px; }
+.games-streaks > span { position: relative; overflow: hidden; background: linear-gradient(140deg, #fff 20%, #f5f8f0 100%); box-shadow: 0 5px 16px #303e1608; transition: transform .24s ease, box-shadow .24s ease; }
+.games-streaks > span:hover { transform: perspective(400px) translateY(-3px) rotateX(5deg); box-shadow: 0 10px 24px #303e1618; }
+.games-streaks svg { animation: streak-spark 2.4s ease-in-out infinite; }
+.games-streaks > span:nth-child(2) svg { animation-delay: .4s; }
+.games-streaks strong { color: #484b3e; font-size: 15px; animation: streak-count 2.4s ease-in-out infinite; transform-origin: center bottom; }
 .games-streaks small { grid-column: 2; color: #929287; font-size: 8px; }
+@keyframes streak-spark { 0%, 100% { transform: translateY(0) scale(1); } 50% { transform: translateY(-2px) scale(1.13); } }
+@keyframes streak-count { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1px); } }
 .game-builder-card, .game-player-card, .game-library { padding: 18px; border: 1px solid #e9e9e1; border-radius: 12px; background: #fff; box-shadow: 0 5px 18px #37371106; }
 .game-builder-card { margin-bottom: 19px; }
 .game-builder-card .network-section-heading { margin-bottom: 14px; }
@@ -475,12 +490,21 @@ button { border: 0; cursor: pointer; }
 .game-filter-row button { padding: 7px 10px; border: 1px solid #e9e9e2; border-radius: 999px; color: #77776d; background: #fff; font-size: 9px; }
 .game-filter-row button:hover, .game-filter-row .game-filter-active { border-color: #d3ddc9; color: #546648; background: #f1f5ec; }
 .game-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 11px; }
-.game-card { position: relative; display: flex; min-width: 0; flex-direction: column; padding: 14px; border: 1px solid #ecece5; border-radius: 10px; background: #fdfdfa; }
-.game-card-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; color: #667951; background: #eff3e9; }
+.game-card { position: relative; display: flex; min-width: 0; flex-direction: column; padding: 14px; border: 1px solid #ecece5; border-radius: 10px; background: #fdfdfa; transform-style: preserve-3d; transition: transform .24s cubic-bezier(.2, .75, .25, 1), box-shadow .24s ease, border-color .24s ease; }
+.game-card:hover { z-index: 1; border-color: #d7dfcd; box-shadow: 0 16px 30px #33371112; transform: perspective(900px) translateY(-5px) rotateX(2deg) rotateY(-1deg); }
+.game-card-icon { display: grid; width: 36px; height: 36px; place-items: center; border-radius: 10px; color: #667951; background: #eff3e9; transition: transform .24s ease, box-shadow .24s ease; }
+.game-card:hover .game-card-icon { box-shadow: 0 7px 12px #64764f25; transform: translateZ(15px) rotate(-5deg); }
 .game-genre { position: absolute; top: 17px; right: 12px; padding: 4px 7px; border-radius: 999px; color: #768367; background: #f0f3eb; font-size: 8px; }
 .game-card h3 { margin: 12px 0 4px; color: #414137; font: 700 13px Manrope, sans-serif; }
 .game-card > p { min-height: 31px; margin: 0 0 10px; color: #77776d; font-size: 9px; line-height: 1.55; overflow-wrap: anywhere; }
 .game-card > small { margin-top: auto; color: #96968b; font-size: 8px; }
+.game-creator-credit { display: flex; align-items: center; gap: 5px; margin: 0 0 8px; color: #687a59; font-size: 9px; font-weight: 700; }
+.game-share-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; padding-top: 8px; border-top: 1px solid #edede6; }
+.game-share-actions a, .game-share-actions button { display: inline-flex; min-height: 27px; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid #e8e9e1; border-radius: 6px; color: #69775b; background: #fff; font: 600 8px Manrope, sans-serif; text-decoration: none; transition: transform .18s ease, border-color .18s ease, background .18s ease; }
+.game-share-actions a:hover, .game-share-actions button:hover { border-color: #d3ddc9; background: #f4f7f0; transform: translateY(-1px); }
+.game-share-linkedin-mark { display: inline-grid; width: 13px; height: 13px; place-items: center; border-radius: 2px; color: #fff; background: #557466; font: 700 9px Arial, sans-serif; }
+.game-player-credit { margin: -5px 0 12px; color: #69775b; font-size: 10px; font-weight: 700; }
+.game-player-credit span { color: #838378; font-weight: 500; }
 .game-card-actions { display: flex; align-items: center; gap: 5px; margin-top: 11px; }
 .game-card-actions .primary-button { min-height: 31px; padding: 0 10px; font-size: 9px; }
 .game-card-actions .icon-quiet { width: 30px; height: 30px; margin-left: auto; color: #85857a; }

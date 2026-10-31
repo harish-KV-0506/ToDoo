@@ -83,8 +83,10 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [workspaceList, setWorkspaceList] = useState<Workspace[]>([])
   const [workspaceId, setWorkspaceId] = useState('')
-  const [activeArea, setActiveArea] = useState<Area>('network')
+  const [activeArea, setActiveArea] = useState<Area>(() => new URLSearchParams(window.location.search).has('game') ? 'games' : 'network')
   const [networkTab, setNetworkTab] = useState<NetworkTab>('feed')
+  const [profileAvatarUrl, setProfileAvatarUrl] = useState<string | null>(null)
+  const [profileAvatarOwnerId, setProfileAvatarOwnerId] = useState<string | null>(null)
   const [workspaceName, setWorkspaceName] = useState('')
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -108,7 +110,40 @@ function App() {
   const invitationConsumed = useRef('')
 
   const user = session?.user ?? null
+  const profileAvatarUserId = user?.id ?? null
   const selectedWorkspace = workspaceList.find((item) => item.id === workspaceId) ?? null
+
+  const refreshProfileAvatar = useCallback(async (path: string | null) => {
+    setProfileAvatarOwnerId(profileAvatarUserId)
+    if (!supabase || !path || !profileAvatarUserId) {
+      setProfileAvatarUrl(null)
+      return
+    }
+    const { data, error: signedUrlError } = await supabase.storage
+      .from('network-media')
+      .createSignedUrl(path, 3600)
+    if (signedUrlError) {
+      setProfileAvatarUrl(null)
+      setAccountError(`Could not load your profile photo: ${signedUrlError.message}`)
+      return
+    }
+    setProfileAvatarUrl(data.signedUrl)
+  }, [supabase, profileAvatarUserId])
+
+  useEffect(() => {
+    if (!supabase || !user) return
+    let active = true
+    void supabase.from('profiles').select('avatar_path').eq('user_id', user.id).single()
+      .then(async ({ data, error: profileError }) => {
+        if (!active) return
+        if (profileError) {
+          setAccountError(`Could not load your profile photo: ${profileError.message}`)
+          return
+        }
+        await refreshProfileAvatar(data.avatar_path)
+      })
+    return () => { active = false }
+  }, [supabase, user, refreshProfileAvatar])
 
   const loadWorkspaces = useCallback(async () => {
     if (!supabase || !user) return
@@ -122,7 +157,7 @@ function App() {
     if (ids.length === 0) {
       setWorkspaceList([])
       setWorkspaceId('')
-      setActiveArea('network')
+      setActiveArea((current) => current === 'games' && new URLSearchParams(window.location.search).has('game') ? current : 'network')
       setWorkspaceName('')
       return
     }
@@ -202,7 +237,9 @@ function App() {
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
-      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') setActiveArea('network')
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+        setActiveArea(event === 'SIGNED_IN' && new URLSearchParams(window.location.search).has('game') ? 'games' : 'network')
+      }
       setError('')
       setAuthMessage('')
       setWorkspaceList([])
@@ -529,7 +566,7 @@ function App() {
           <header className="network-standalone-header">
             <Brand />
             <div>
-              <button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
+              <button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{profileAvatarOwnerId === user.id && profileAvatarUrl ? <img src={profileAvatarUrl} alt="" onError={() => setProfileAvatarUrl(null)} /> : initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
               <button className="quiet-button" onClick={() => setActiveArea('network')}><House size={16} /> Home feed</button>
               <button className="quiet-button" onClick={() => setActiveArea('games')}><Gamepad2 size={16} /> Games</button>
               <button className="quiet-button" onClick={() => setActiveArea('tasks')}><ListTodo size={16} /> Create a board</button>
@@ -538,14 +575,14 @@ function App() {
           </header>
           {accountError && <p className="account-error" role="alert">{accountError}</p>}
           {activeArea === 'network'
-            ? <SocialNetwork key={user.id} supabase={supabase!} user={user} tab={networkTab} onTabChange={setNetworkTab} />
+            ? <SocialNetwork key={user.id} supabase={supabase!} user={user} tab={networkTab} onTabChange={setNetworkTab} onAvatarPathChange={refreshProfileAvatar} />
             : <GamesStudio key={user.id} supabase={supabase!} user={user} />}
         </main>
       )
     }
     return (
       <main className="onboarding-page">
-        <header className="onboarding-top"><Brand /><div className="onboarding-actions"><button className="quiet-button" onClick={() => setActiveArea('network')}><BriefcaseBusiness size={15} /> Explore professionals</button><button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button><button className="topbar-signout" onClick={signOut} disabled={signingOut} aria-label="Log out" title="Log out"><LogOut size={15} /><span>{signingOut ? 'Logging out…' : 'Log out'}</span></button></div></header>
+        <header className="onboarding-top"><Brand /><div className="onboarding-actions"><button className="quiet-button" onClick={() => setActiveArea('network')}><BriefcaseBusiness size={15} /> Explore professionals</button><button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{profileAvatarOwnerId === user.id && profileAvatarUrl ? <img src={profileAvatarUrl} alt="" onError={() => setProfileAvatarUrl(null)} /> : initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button><button className="topbar-signout" onClick={signOut} disabled={signingOut} aria-label="Log out" title="Log out"><LogOut size={15} /><span>{signingOut ? 'Logging out…' : 'Log out'}</span></button></div></header>
         {accountError && <p className="account-error" role="alert">{accountError}</p>}
         <section className="onboarding-card">
           <div className="onboarding-art"><span className="art-sparkle art-sparkle-one">✳</span><span className="art-card art-card-back" /><span className="art-card art-card-mid" /><span className="art-card art-card-front"><Check size={26} /></span><span className="art-sparkle art-sparkle-two">✦</span></div>
@@ -614,14 +651,14 @@ function App() {
           <div className="breadcrumb"><span>{activeArea === 'tasks' ? workspaceName || 'Your board' : 'ToDoo community'}</span><span className="breadcrumb-slash">/</span><strong>{activeArea === 'network' ? 'Home feed' : activeArea === 'games' ? 'Game community' : filters.find((item) => item.id === filter)?.label}</strong></div>
           <div className="topbar-actions">
             {activeArea === 'tasks' && <><span className={`live-indicator ${realtimeConnected ? 'live-indicator-on' : ''}`}><i />{realtimeConnected ? 'Live' : 'Connecting'}</span><button className="member-pill" onClick={() => setShowInvite(true)}><Users size={15} /><span>{members.length}</span><Plus size={15} /></button></>}
-            <button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
+            <button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{profileAvatarOwnerId === user.id && profileAvatarUrl ? <img src={profileAvatarUrl} alt="" onError={() => setProfileAvatarUrl(null)} /> : initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
             <button className="topbar-signout" onClick={signOut} disabled={signingOut} aria-label="Log out" title="Log out"><LogOut size={15} /><span>{signingOut ? 'Logging out…' : 'Log out'}</span></button>
           </div>
         </header>
         {accountError && <p className="account-error" role="alert">{accountError}</p>}
 
         {activeArea === 'network' ? (
-          <SocialNetwork key={user.id} supabase={supabase!} user={user} tab={networkTab} onTabChange={setNetworkTab} />
+          <SocialNetwork key={user.id} supabase={supabase!} user={user} tab={networkTab} onTabChange={setNetworkTab} onAvatarPathChange={refreshProfileAvatar} />
         ) : activeArea === 'games' ? (
           <GamesStudio key={user.id} supabase={supabase!} user={user} />
         ) : <section className="board-content">

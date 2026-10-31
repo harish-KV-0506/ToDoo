@@ -29,6 +29,7 @@ type Props = {
   user: User
   tab: NetworkTab
   onTabChange: (tab: NetworkTab) => void
+  onAvatarPathChange: (path: string | null) => void
 }
 
 type FeedPost = WorkPost & {
@@ -140,7 +141,7 @@ function LinkPreviewCard({
   )
 }
 
-export default function SocialNetwork({ supabase, user, tab, onTabChange }: Props) {
+export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvatarPathChange }: Props) {
   const fallbackName = String(user.user_metadata.display_name ?? user.email?.split('@')[0] ?? 'ToDoo member')
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
   const [publicDetails, setPublicDetails] = useState<Record<string, PublicProfileDetails>>({})
@@ -191,6 +192,7 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange }: Prop
     if (connectionsResult.error) throw connectionsResult.error
     if (privateDetailsResult.error) throw privateDetailsResult.error
     if (publicDetailsResult.error) throw publicDetailsResult.error
+    onAvatarPathChange(profileResult.data.avatar_path)
 
     const postIds = postsResult.data.map((post) => post.id)
     const [commentsResult, usefulResult] = postIds.length
@@ -256,7 +258,7 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange }: Prop
     }))
     setUsefulPostIds(new Set(usefulResult.data.map((mark) => mark.post_id)))
     setLoading(false)
-  }, [supabase, user.id])
+  }, [supabase, user.id, onAvatarPathChange])
 
   const reportInitialLoadError = useCallback((loadError: Error) => {
     setError(`Could not load the home feed: ${loadError.message}`)
@@ -534,6 +536,7 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange }: Prop
       if (detailsError) throw new Error(`Your main profile was saved, but the additional profile details were not: ${detailsError.message}`)
       setProfile(data)
       setProfiles((current) => current.map((person) => person.user_id === user.id ? data : person))
+      onAvatarPathChange(data.avatar_path)
       const nextPublicDetails = {
         user_id: user.id,
         linkedin_url: details.linkedin_url,
