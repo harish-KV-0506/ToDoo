@@ -20,11 +20,15 @@ import {
   X,
 } from 'lucide-react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { Database, ProfessionalConnection, ProfessionalProfile, WorkPost, WorkPostComment } from './lib/types'
+import type { BirthdayVisibility, Database, PrivateProfileDetails, ProfessionalConnection, ProfessionalProfile, PublicProfileDetails, WorkPost, WorkPostComment } from './lib/types'
+
+export type NetworkTab = 'feed' | 'people' | 'profile'
 
 type Props = {
   supabase: SupabaseClient<Database>
   user: User
+  tab: NetworkTab
+  onTabChange: (tab: NetworkTab) => void
 }
 
 type FeedPost = WorkPost & {
@@ -46,8 +50,6 @@ type LinkPreview = {
 }
 
 type PreviewStatus = 'idle' | 'loading' | 'ready' | 'error'
-type NetworkTab = 'feed' | 'people' | 'profile'
-
 const imageTypes = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
@@ -75,6 +77,11 @@ function timeAgo(value: string) {
   if (hours < 24) return `${hours}h ago`
   const days = Math.floor(hours / 24)
   return days < 7 ? `${days}d ago` : new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(new Date(value))
+}
+
+function localDateKey() {
+  const date = new Date()
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
 function interestTokens(profile: ProfessionalProfile | null) {
@@ -133,10 +140,10 @@ function LinkPreviewCard({
   )
 }
 
-export default function SocialNetwork({ supabase, user }: Props) {
+export default function SocialNetwork({ supabase, user, tab, onTabChange }: Props) {
   const fallbackName = String(user.user_metadata.display_name ?? user.email?.split('@')[0] ?? 'ToDoo member')
-  const [tab, setTab] = useState<NetworkTab>('feed')
   const [profile, setProfile] = useState<ProfessionalProfile | null>(null)
+  const [publicDetails, setPublicDetails] = useState<Record<string, PublicProfileDetails>>({})
   const [profiles, setProfiles] = useState<ProfessionalProfile[]>([])
   const [posts, setPosts] = useState<FeedPost[]>([])
   const [comments, setComments] = useState<FeedComment[]>([])
@@ -153,6 +160,11 @@ export default function SocialNetwork({ supabase, user }: Props) {
   const [bio, setBio] = useState('')
   const [location, setLocation] = useState('')
   const [portfolioUrl, setPortfolioUrl] = useState('')
+  const [linkedinUrl, setLinkedinUrl] = useState('')
+  const [socialLinksText, setSocialLinksText] = useState('')
+  const [dateOfBirth, setDateOfBirth] = useState('')
+  const [birthdayVisibility, setBirthdayVisibility] = useState<BirthdayVisibility>('hidden')
+  const [todayDate] = useState(localDateKey)
   const [preview, setPreview] = useState<LinkPreview | null>(null)
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('idle')
   const [previewMessage, setPreviewMessage] = useState('')
@@ -165,16 +177,20 @@ export default function SocialNetwork({ supabase, user }: Props) {
   const initializedProfileId = useRef<string | null>(null)
 
   const loadNetwork = useCallback(async () => {
-    const [profileResult, profilesResult, postsResult, connectionsResult] = await Promise.all([
+    const [profileResult, profilesResult, postsResult, connectionsResult, privateDetailsResult, publicDetailsResult] = await Promise.all([
       supabase.from('profiles').select('*').eq('user_id', user.id).single(),
       supabase.from('profiles').select('*').order('display_name').limit(100),
       supabase.from('work_posts').select('*').order('created_at', { ascending: false }).limit(50),
       supabase.from('professional_connections').select('*').or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`).order('created_at', { ascending: false }),
+      supabase.from('private_profile_details').select('*').eq('user_id', user.id).maybeSingle(),
+      supabase.rpc('get_public_profile_details'),
     ])
     if (profileResult.error) throw profileResult.error
     if (profilesResult.error) throw profilesResult.error
     if (postsResult.error) throw postsResult.error
     if (connectionsResult.error) throw connectionsResult.error
+    if (privateDetailsResult.error) throw privateDetailsResult.error
+    if (publicDetailsResult.error) throw publicDetailsResult.error
 
     const postIds = postsResult.data.map((post) => post.id)
     const [commentsResult, usefulResult] = postIds.length
@@ -213,11 +229,16 @@ export default function SocialNetwork({ supabase, user }: Props) {
     }
 
     setProfile(profileResult.data)
+    setPublicDetails(Object.fromEntries(publicDetailsResult.data.map((details) => [details.user_id, details])))
     if (initializedProfileId.current !== user.id) {
       setHeadline(profileResult.data.headline ?? '')
       setBio(profileResult.data.bio ?? '')
       setLocation(profileResult.data.location ?? '')
       setPortfolioUrl(profileResult.data.portfolio_url ?? '')
+      setLinkedinUrl(privateDetailsResult.data?.linkedin_url ?? '')
+      setSocialLinksText(privateDetailsResult.data?.social_links.join('\n') ?? '')
+      setDateOfBirth(privateDetailsResult.data?.date_of_birth ?? '')
+      setBirthdayVisibility(privateDetailsResult.data?.birthday_visibility ?? 'hidden')
       initializedProfileId.current = user.id
     }
     setProfiles(people)
@@ -465,6 +486,23 @@ export default function SocialNetwork({ supabase, user }: Props) {
       setError('Use a valid portfolio link starting with https:// or http://.')
       return
     }
+    const cleanLinkedinUrl = linkedinUrl.trim()
+    if (cleanLinkedinUrl) {
+      const validLinkedinUrl = safeUrl(cleanLinkedinUrl)
+      if (!validLinkedinUrl?.startsWith('https://') || !new URL(validLinkedinUrl).hostname.toLowerCase().endsWith('linkedin.com')) {
+        setError('Use a valid LinkedIn profile link, such as https://www.linkedin.com/in/your-name.')
+        return
+      }
+    }
+    const cleanSocialLinks = socialLinksText.split(/\n/).map((value) => value.trim()).filter(Boolean)
+    if (cleanSocialLinks.length > 10 || cleanSocialLinks.some((value) => !safeUrl(value))) {
+      setError('Add up to 10 valid social profile links, one HTTPS or HTTP link per line.')
+      return
+    }
+    if (dateOfBirth && dateOfBirth > todayDate) {
+      setError('Date of birth cannot be in the future.')
+      return
+    }
     setSaving(true)
     setError('')
     setNotice('')
@@ -481,8 +519,32 @@ export default function SocialNetwork({ supabase, user }: Props) {
         .select('*')
         .single()
       if (updateError) throw updateError
+      const detailsToSave: PrivateProfileDetails = {
+        user_id: user.id,
+        linkedin_url: cleanLinkedinUrl || null,
+        social_links: cleanSocialLinks,
+        date_of_birth: dateOfBirth || null,
+        birthday_visibility: birthdayVisibility,
+      }
+      const { data: details, error: detailsError } = await supabase
+        .from('private_profile_details')
+        .upsert(detailsToSave, { onConflict: 'user_id' })
+        .select('*')
+        .single()
+      if (detailsError) throw new Error(`Your main profile was saved, but the additional profile details were not: ${detailsError.message}`)
       setProfile(data)
       setProfiles((current) => current.map((person) => person.user_id === user.id ? data : person))
+      const nextPublicDetails = {
+        user_id: user.id,
+        linkedin_url: details.linkedin_url,
+        social_links: details.social_links,
+        public_birthday: details.birthday_visibility === 'public'
+          ? details.date_of_birth
+          : details.birthday_visibility === 'hide_year' && details.date_of_birth
+            ? new Intl.DateTimeFormat(undefined, { month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${details.date_of_birth}T00:00:00Z`))
+            : null,
+      }
+      setPublicDetails((current) => ({ ...current, [user.id]: nextPublicDetails }))
       setNotice('Your profile is up to date.')
     } catch (saveError) {
       setError(`Could not save your profile: ${(saveError as Error).message}`)
@@ -652,9 +714,9 @@ export default function SocialNetwork({ supabase, user }: Props) {
       </header>
 
       <nav className="network-tabs" aria-label="Social network sections">
-        <button className={tab === 'feed' ? 'network-tab-active' : ''} onClick={() => setTab('feed')}>Home feed</button>
-        <button className={tab === 'people' ? 'network-tab-active' : ''} onClick={() => setTab('people')}>Discover{incoming.length > 0 && <span className="network-tab-count">{incoming.length}</span>}</button>
-        <button className={tab === 'profile' ? 'network-tab-active' : ''} onClick={() => setTab('profile')}>My profile</button>
+        <button className={tab === 'feed' ? 'network-tab-active' : ''} onClick={() => onTabChange('feed')}>Home feed</button>
+        <button className={tab === 'people' ? 'network-tab-active' : ''} onClick={() => onTabChange('people')}>Discover{incoming.length > 0 && <span className="network-tab-count">{incoming.length}</span>}</button>
+        <button className={tab === 'profile' ? 'network-tab-active' : ''} onClick={() => onTabChange('profile')}>My profile</button>
       </nav>
 
       {error && <div className="network-alert network-alert-error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
@@ -757,8 +819,8 @@ export default function SocialNetwork({ supabase, user }: Props) {
           <aside className="network-side-card">
             <div className="network-side-profile"><Avatar name={profile?.display_name ?? fallbackName} imageUrl={profile?.avatar_path ? imageUrls[profile.avatar_path] ?? null : null} size="network-avatar-large" /><strong>{profile?.display_name ?? fallbackName}</strong><span>{profile?.headline || 'Add a headline to introduce yourself.'}</span></div>
             {profile?.location && <p className="network-location"><MapPin size={14} />{profile.location}</p>}
-            <button className="network-edit-profile" onClick={() => setTab('profile')}><Pencil size={14} /> Complete your profile</button>
-            <button className="network-discover-link" onClick={() => setTab('people')}><UserRoundPlus size={14} /> Find professionals</button>
+            <button className="network-edit-profile" onClick={() => onTabChange('profile')}><Pencil size={14} /> Complete your profile</button>
+            <button className="network-discover-link" onClick={() => onTabChange('people')}><UserRoundPlus size={14} /> Find professionals</button>
             {suggestedPeople.length > 0 && (
               <section className="network-suggestions">
                 <h2>Suggested for you</h2>
@@ -799,11 +861,15 @@ export default function SocialNetwork({ supabase, user }: Props) {
               const connection = connectionByPerson.get(person.user_id)
               const incomingRequest = connection?.status === 'pending' && connection.addressee_id === user.id
               const interests = sharedInterestCount(profile, person)
+              const details = publicDetails[person.user_id]
               return (
                 <article className="network-person-card" key={person.user_id}>
                   <Avatar name={person.display_name} imageUrl={person.avatar_path ? imageUrls[person.avatar_path] ?? null : null} size="network-avatar-large" />
                   <div className="network-person-copy"><strong>{person.display_name}</strong><small>{person.headline || 'ToDoo member'}</small>{person.location && <small className="network-person-location"><MapPin size={12} />{person.location}</small>}{interests > 0 && <small>{interests} shared professional interest{interests === 1 ? '' : 's'}</small>}</div>
                   {person.portfolio_url && safeUrl(person.portfolio_url) && <a className="network-person-link" href={safeUrl(person.portfolio_url) ?? undefined} target="_blank" rel="noopener noreferrer" aria-label={`Open ${person.display_name}'s portfolio`}><ArrowUpRight size={15} /></a>}
+                  {details?.linkedin_url && safeUrl(details.linkedin_url) && <a className="network-person-link" href={safeUrl(details.linkedin_url) ?? undefined} target="_blank" rel="noopener noreferrer" aria-label={`Open ${person.display_name}'s LinkedIn`}><BriefcaseBusiness size={15} /></a>}
+                  {details?.social_links.map((link) => <a className="network-person-link" href={safeUrl(link) ?? undefined} target="_blank" rel="noopener noreferrer" aria-label={`Open ${person.display_name}'s social profile`} key={link}><Globe2 size={15} /></a>)}
+                  {details?.public_birthday && <small className="network-person-birthday">Birthday · {details.public_birthday}</small>}
                   {connection?.status === 'accepted'
                     ? <span className="network-connected"><Check size={14} /> Connected</span>
                     : incomingRequest
@@ -833,7 +899,17 @@ export default function SocialNetwork({ supabase, user }: Props) {
             <label>Location<input value={location} onChange={(event) => setLocation(event.target.value)} maxLength={120} placeholder="e.g. Bengaluru, India" /></label>
             <label>Portfolio or website<input type="url" value={portfolioUrl} onChange={(event) => setPortfolioUrl(event.target.value)} maxLength={2048} placeholder="https://yourportfolio.com" /></label>
           </div>
-          <p className="network-profile-note">Your name, photo, headline, about section, location, and portfolio are visible to signed-in ToDoo members.</p>
+          <label>LinkedIn profile<input type="url" value={linkedinUrl} onChange={(event) => setLinkedinUrl(event.target.value)} maxLength={2048} placeholder="https://www.linkedin.com/in/your-name" /></label>
+          <label>Other social profile links<textarea value={socialLinksText} onChange={(event) => setSocialLinksText(event.target.value)} maxLength={20480} rows={3} placeholder={'One profile link per line, for example:\nhttps://github.com/your-name\nhttps://instagram.com/your-name'} /></label>
+          <div className="network-profile-row">
+            <label>Date of birth<input type="date" value={dateOfBirth} onChange={(event) => setDateOfBirth(event.target.value)} max={todayDate} /></label>
+            <label>Birthday visibility<select value={birthdayVisibility} onChange={(event) => setBirthdayVisibility(event.target.value as BirthdayVisibility)}>
+              <option value="hidden">Hide completely</option>
+              <option value="hide_year">Show month and day; hide year</option>
+              <option value="public">Show full date to signed-in members</option>
+            </select></label>
+          </div>
+          <p className="network-profile-note">Your LinkedIn and other social links are shown to signed-in members. Your date of birth stays private unless you choose otherwise; “hide year” shares only the month and day.</p>
           <button className="primary-button network-save-profile" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button>
         </form>
       )}

@@ -11,6 +11,7 @@ import {
   BriefcaseBusiness,
   Clock3,
   Flag,
+  Gamepad2,
   House,
   LayoutGrid,
   ListTodo,
@@ -28,11 +29,12 @@ import {
 } from 'lucide-react'
 import { getSupabaseClient, isSupabaseConfigured, supabaseConfigIssue } from './lib/supabase'
 import type { Task, TaskPriority, TaskStatus, Workspace, WorkspaceInvitation, WorkspaceMember } from './lib/types'
-import SocialNetwork from './SocialNetwork'
+import SocialNetwork, { type NetworkTab } from './SocialNetwork'
+import GamesStudio from './GamesStudio'
 import './App.css'
 
 type Filter = 'all' | 'mine' | 'today' | 'upcoming' | 'completed'
-type Area = 'tasks' | 'network'
+type Area = 'tasks' | 'network' | 'games'
 
 const filters: { id: Filter; label: string; icon: typeof LayoutGrid }[] = [
   { id: 'all', label: 'All tasks', icon: LayoutGrid },
@@ -76,10 +78,13 @@ function App() {
   const [displayName, setDisplayName] = useState('')
   const [authMessage, setAuthMessage] = useState('')
   const [error, setError] = useState('')
+  const [accountError, setAccountError] = useState('')
+  const [signingOut, setSigningOut] = useState(false)
   const [loading, setLoading] = useState(false)
   const [workspaceList, setWorkspaceList] = useState<Workspace[]>([])
   const [workspaceId, setWorkspaceId] = useState('')
   const [activeArea, setActiveArea] = useState<Area>('network')
+  const [networkTab, setNetworkTab] = useState<NetworkTab>('feed')
   const [workspaceName, setWorkspaceName] = useState('')
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -95,6 +100,8 @@ function App() {
   const [inviteEmail, setInviteEmail] = useState('')
   const [invitedEmail, setInvitedEmail] = useState('')
   const [inviteLink, setInviteLink] = useState('')
+  const [inviteEmailSent, setInviteEmailSent] = useState(false)
+  const [inviteStatus, setInviteStatus] = useState('')
   const [copied, setCopied] = useState(false)
   const [realtimeConnected, setRealtimeConnected] = useState(false)
   const [showInvite, setShowInvite] = useState(false)
@@ -422,21 +429,23 @@ function App() {
     setLoading(true)
     setError('')
     setInviteLink('')
+    setInviteStatus('')
+    setInviteEmailSent(false)
     try {
-      const bytes = crypto.getRandomValues(new Uint8Array(32))
-      const token = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
-      const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
-      const tokenHash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
-      const { error: inviteError } = await supabase.rpc('create_workspace_invitation', {
-        target_workspace: workspaceId,
-        invited_email: inviteEmail.trim(),
-        token_hash: tokenHash,
+      const { data, error: inviteError } = await supabase.functions.invoke('send-workspace-invitation', {
+        body: {
+          target_workspace: workspaceId,
+          invited_email: inviteEmail.trim(),
+        },
       })
       if (inviteError) throw inviteError
+      if (!data || typeof data.invite_url !== 'string') {
+        throw new Error(typeof data?.error === 'string' ? data.error : 'The invitation service returned no invite link.')
+      }
       setInvitedEmail(inviteEmail.trim())
-      const inviteUrl = new URL(import.meta.env.BASE_URL, window.location.origin)
-      inviteUrl.searchParams.set('invite', token)
-      setInviteLink(inviteUrl.toString())
+      setInviteLink(data.invite_url)
+      setInviteEmailSent(data.email_sent === true)
+      setInviteStatus(typeof data.message === 'string' ? data.message : '')
       setInviteEmail('')
       await loadWorkspaceData()
     } catch (inviteError) {
@@ -458,10 +467,17 @@ function App() {
   }
 
   const signOut = async () => {
-    if (!supabase) return
-    setError('')
-    const { error: signOutError } = await supabase.auth.signOut()
-    if (signOutError) setError(`Could not sign out: ${signOutError.message}`)
+    if (!supabase || signingOut) return
+    setSigningOut(true)
+    setAccountError('')
+    try {
+      const { error: signOutError } = await supabase.auth.signOut()
+      if (signOutError) throw signOutError
+    } catch (signOutError) {
+      setAccountError(`Could not sign out: ${(signOutError as Error).message}`)
+    } finally {
+      setSigningOut(false)
+    }
   }
 
   if (!isSupabaseConfigured) {
@@ -507,23 +523,30 @@ function App() {
   }
 
   if (workspaceList.length === 0) {
-    if (activeArea === 'network') {
+    if (activeArea === 'network' || activeArea === 'games') {
       return (
         <main className="network-standalone">
           <header className="network-standalone-header">
             <Brand />
             <div>
+              <button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
+              <button className="quiet-button" onClick={() => setActiveArea('network')}><House size={16} /> Home feed</button>
+              <button className="quiet-button" onClick={() => setActiveArea('games')}><Gamepad2 size={16} /> Games</button>
               <button className="quiet-button" onClick={() => setActiveArea('tasks')}><ListTodo size={16} /> Create a board</button>
-              <button className="quiet-button" onClick={signOut}><LogOut size={16} /> Sign out</button>
+              <button className="topbar-signout" onClick={signOut} disabled={signingOut} aria-label="Log out" title="Log out"><LogOut size={15} /><span>{signingOut ? 'Logging out…' : 'Log out'}</span></button>
             </div>
           </header>
-          <SocialNetwork key={user.id} supabase={supabase!} user={user} />
+          {accountError && <p className="account-error" role="alert">{accountError}</p>}
+          {activeArea === 'network'
+            ? <SocialNetwork key={user.id} supabase={supabase!} user={user} tab={networkTab} onTabChange={setNetworkTab} />
+            : <GamesStudio key={user.id} supabase={supabase!} user={user} />}
         </main>
       )
     }
     return (
       <main className="onboarding-page">
-        <header className="onboarding-top"><Brand /><div className="onboarding-actions"><button className="quiet-button" onClick={() => setActiveArea('network')}><BriefcaseBusiness size={15} /> Explore professionals</button><button className="quiet-button" onClick={signOut}><LogOut size={16} /> Sign out</button></div></header>
+        <header className="onboarding-top"><Brand /><div className="onboarding-actions"><button className="quiet-button" onClick={() => setActiveArea('network')}><BriefcaseBusiness size={15} /> Explore professionals</button><button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button><button className="topbar-signout" onClick={signOut} disabled={signingOut} aria-label="Log out" title="Log out"><LogOut size={15} /><span>{signingOut ? 'Logging out…' : 'Log out'}</span></button></div></header>
+        {accountError && <p className="account-error" role="alert">{accountError}</p>}
         <section className="onboarding-card">
           <div className="onboarding-art"><span className="art-sparkle art-sparkle-one">✳</span><span className="art-card art-card-back" /><span className="art-card art-card-mid" /><span className="art-card art-card-front"><Check size={26} /></span><span className="art-sparkle art-sparkle-two">✦</span></div>
           <p className="eyebrow">Your first little win</p>
@@ -559,6 +582,9 @@ function App() {
           <button className={`sidebar-link ${activeArea === 'network' ? 'sidebar-link-active' : ''}`} onClick={() => setActiveArea('network')} aria-label="Home feed" aria-current={activeArea === 'network' ? 'page' : undefined}>
             <House size={18} strokeWidth={1.8} /><span>Home feed</span>
           </button>
+          <button className={`sidebar-link ${activeArea === 'games' ? 'sidebar-link-active' : ''}`} onClick={() => setActiveArea('games')} aria-label="Game community" aria-current={activeArea === 'games' ? 'page' : undefined}>
+            <Gamepad2 size={18} strokeWidth={1.8} /><span>Game community</span>
+          </button>
           {filters.map(({ id, label, icon: Icon }) => (
             <button className={`sidebar-link ${activeArea === 'tasks' && filter === id ? 'sidebar-link-active' : ''}`} key={id} onClick={() => { setActiveArea('tasks'); setFilter(id) }} aria-label={label} aria-current={activeArea === 'tasks' && filter === id ? 'page' : undefined}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
@@ -585,15 +611,19 @@ function App() {
       <main className="main-panel">
         <header className="topbar">
           <div className="mobile-brand"><Brand /></div>
-          <div className="breadcrumb"><span>{activeArea === 'network' ? 'ToDoo community' : workspaceName || 'Your board'}</span><span className="breadcrumb-slash">/</span><strong>{activeArea === 'network' ? 'Home feed' : filters.find((item) => item.id === filter)?.label}</strong></div>
+          <div className="breadcrumb"><span>{activeArea === 'tasks' ? workspaceName || 'Your board' : 'ToDoo community'}</span><span className="breadcrumb-slash">/</span><strong>{activeArea === 'network' ? 'Home feed' : activeArea === 'games' ? 'Game community' : filters.find((item) => item.id === filter)?.label}</strong></div>
           <div className="topbar-actions">
             {activeArea === 'tasks' && <><span className={`live-indicator ${realtimeConnected ? 'live-indicator-on' : ''}`}><i />{realtimeConnected ? 'Live' : 'Connecting'}</span><button className="member-pill" onClick={() => setShowInvite(true)}><Users size={15} /><span>{members.length}</span><Plus size={15} /></button></>}
-            <button className="topbar-avatar" aria-label="Account settings">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
+            <button className="topbar-avatar" onClick={() => { setActiveArea('network'); setNetworkTab('profile') }} aria-label="Open your profile" title="Open your profile">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
+            <button className="topbar-signout" onClick={signOut} disabled={signingOut} aria-label="Log out" title="Log out"><LogOut size={15} /><span>{signingOut ? 'Logging out…' : 'Log out'}</span></button>
           </div>
         </header>
+        {accountError && <p className="account-error" role="alert">{accountError}</p>}
 
         {activeArea === 'network' ? (
-          <SocialNetwork key={user.id} supabase={supabase!} user={user} />
+          <SocialNetwork key={user.id} supabase={supabase!} user={user} tab={networkTab} onTabChange={setNetworkTab} />
+        ) : activeArea === 'games' ? (
+          <GamesStudio key={user.id} supabase={supabase!} user={user} />
         ) : <section className="board-content">
           <div className="board-heading">
             <div className="board-heading-copy">
@@ -680,8 +710,8 @@ function App() {
             <p className="eyebrow">Better, together</p>
             <h2 id="invite-title">Bring your people in.</h2>
             <p className="invite-description">Invite teammates to <strong>{workspaceName}</strong>. They’ll be able to see, add, and update tasks on this board.</p>
-            <form className="invite-form" onSubmit={createInvite}><label className="sr-only" htmlFor="invite-email">Teammate email address</label><input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="teammate@example.com" required /><button className="primary-button" disabled={loading}><MailPlus size={15} /> Create invite</button></form>
-            {inviteLink && <div className="invite-created"><div><CheckCircle2 size={16} /><strong>Your invite is ready</strong></div><p>Share this one-time link with {invitedEmail}; it expires in 7 days.</p><div className="invite-link-row"><input readOnly value={inviteLink} aria-label="Invitation link" /><button className="copy-button" onClick={() => void copyInvite()}>{copied ? <Check size={14} /> : <Clipboard size={14} />}{copied ? 'Copied' : 'Copy link'}</button></div></div>}
+            <form className="invite-form" onSubmit={createInvite}><label className="sr-only" htmlFor="invite-email">Teammate email address</label><input id="invite-email" type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="teammate@example.com" required /><button className="primary-button" disabled={loading}><MailPlus size={15} /> {loading ? 'Sending…' : 'Send email invite'}</button></form>
+            {inviteLink && <div className="invite-created"><div><CheckCircle2 size={16} /><strong>{inviteEmailSent ? 'Invitation email sent' : 'Invite link ready'}</strong></div><p>{inviteStatus || `Share this one-time link with ${invitedEmail}; it expires in 7 days.`}</p><div className="invite-link-row"><input readOnly value={inviteLink} aria-label="Invitation link" /><button className="copy-button" onClick={() => void copyInvite()}>{copied ? <Check size={14} /> : <Clipboard size={14} />}{copied ? 'Copied' : 'Copy link'}</button></div></div>}
             {error && <Notice tone="error">{error}</Notice>}
             <div className="members-section"><strong>On this board <span>{members.length}</span></strong>{members.map((member, index) => <div className="dialog-member" key={member.user_id}><span className={`member-avatar member-color-${index % 4}`}>{initials(member.display_name)}</span><span><strong>{member.display_name}</strong><small>{member.user_id === user.id ? 'You' : 'Board member'}</small></span><small className="member-role">{member.role}</small></div>)}{invitations.length > 0 && <p className="pending-invites">{invitations.length} invite{invitations.length === 1 ? '' : 's'} awaiting acceptance</p>}</div>
           </section>

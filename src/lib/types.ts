@@ -47,6 +47,23 @@ export type ProfessionalProfile = {
   created_at: string
 }
 
+export type BirthdayVisibility = 'public' | 'hide_year' | 'hidden'
+
+export type PrivateProfileDetails = {
+  user_id: string
+  linkedin_url: string | null
+  social_links: string[]
+  date_of_birth: string | null
+  birthday_visibility: BirthdayVisibility
+}
+
+export type PublicProfileDetails = {
+  user_id: string
+  linkedin_url: string | null
+  social_links: string[]
+  public_birthday: string | null
+}
+
 export type WorkPost = {
   id: string
   author_id: string
@@ -76,6 +93,25 @@ export type ProfessionalConnection = {
   updated_at: string
 }
 
+export type GameGenre = 'arcade' | 'puzzle' | 'platformer' | 'strategy' | 'other'
+
+export type CommunityGame = {
+  id: string
+  author_id: string
+  title: string
+  description: string
+  genre: GameGenre
+  html: string
+  created_at: string
+}
+
+export type GameActivity = {
+  user_id: string
+  activity_date: string
+  activity_type: 'created' | 'played'
+  created_at: string
+}
+
 type Table<Row, Insert, Update = Partial<Insert>> = {
   Row: Row
   Insert: Insert
@@ -90,6 +126,11 @@ type Database = {
         ProfessionalProfile,
         Omit<ProfessionalProfile, 'created_at'> & { created_at?: string },
         Partial<Omit<ProfessionalProfile, 'user_id' | 'created_at'>>
+      >
+      private_profile_details: Table<
+        PrivateProfileDetails,
+        PrivateProfileDetails,
+        never
       >
       workspaces: Table<Workspace, never, never>
       workspace_members: Table<
@@ -123,6 +164,16 @@ type Database = {
         Omit<ProfessionalConnection, 'id' | 'created_at' | 'updated_at'> & { id?: string; created_at?: string; updated_at?: string },
         Partial<Pick<ProfessionalConnection, 'status'>>
       >
+      community_games: Table<
+        CommunityGame,
+        Omit<CommunityGame, 'id' | 'created_at'> & { id?: string; created_at?: string },
+        Partial<Pick<CommunityGame, 'title' | 'description' | 'genre' | 'html'>>
+      >
+      game_activity: Table<
+        GameActivity,
+        Omit<GameActivity, 'created_at'> & { created_at?: string },
+        never
+      >
     }
     Views: Record<string, never>
     Functions: {
@@ -134,6 +185,10 @@ type Database = {
       'link-preview': {
         Args: { url: string }
         Returns: { title: string; description: string | null; image_url: string | null; site_name: string | null }
+      }
+      get_public_profile_details: {
+        Args: Record<string, never>
+        Returns: PublicProfileDetails[]
       }
     }
     Enums: Record<string, never>
