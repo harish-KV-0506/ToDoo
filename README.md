@@ -14,10 +14,20 @@ professionals, and send or accept connection requests.
    [`supabase/migrations/20261031000000_todoo_collaboration.sql`](./supabase/migrations/20261031000000_todoo_collaboration.sql).
    Run [`supabase/migrations/20261031080000_professional_network.sql`](./supabase/migrations/20261031080000_professional_network.sql)
    after the collaboration migration to add the professional network.
-3. In Authentication settings, add the development URL and production GitHub
+3. Run [`supabase/migrations/20261031090000_social_feed_features.sql`](./supabase/migrations/20261031090000_social_feed_features.sql)
+   to add member-only profile photos and post images, comments, and “Useful” marks.
+4. Sign in to the Supabase CLI, then deploy the link-preview function. Run the
+   migration first so the frontend and function are used only after their
+   database fields and storage bucket exist:
+
+   ```sh
+   npx supabase login
+   npx supabase functions deploy link-preview --project-ref pkushkxrhrydsnsavper --use-api
+   ```
+5. In Authentication settings, add the development URL and production GitHub
    Pages URL to the allowed site URLs / redirect URLs. Configure email
    confirmation and production SMTP before inviting real users.
-4. Copy `.env.example` to `.env.local` and add your Supabase project URL and
+6. Copy `.env.example` to `.env.local` and add your Supabase project URL and
    **publishable** key. Never put a `service_role` key in this frontend.
 
 ```sh
@@ -32,14 +42,18 @@ teammate must receive the link separately.
 
 ## Professional network
 
-The professional network uses the same ToDoo account as task boards. Members
-can publish text updates with an optional project link, add a headline, bio,
-location, and portfolio link to their profile, discover other signed-in
-members, and send or accept connection requests. Work posts and profile details
-are visible to all signed-in members; connection records are visible only to
-the people involved. The feed and connection requests update through Supabase
-Realtime. Posts are text-and-link only; image uploads, comments, and reactions
-are not included.
+The signed-in home page is the professional feed. Members can publish work
+updates with an optional single image and project link, use profile photos,
+comment on posts, and mark posts “Useful” without public like counts. Link
+previews are requested from the ToDoo Supabase Edge Function; only HTTPS links
+are previewed, and the function rejects private/local destinations and
+redirects. The function fetches metadata from the linked site itself, not a
+third-party preview provider. Members can also discover professionals and send
+or accept connection requests. Profiles and posts are visible to signed-in
+members; uploaded images are stored in a private Supabase Storage bucket and
+served to signed-in members. Feed, comment, useful-mark, and connection updates
+use Supabase Realtime. Recommendations rank connected members and profiles
+with matching professional interests first, then recent activity.
 
 ## GitHub Pages
 

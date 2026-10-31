@@ -43,6 +43,7 @@ export type ProfessionalProfile = {
   bio: string | null
   location: string | null
   portfolio_url: string | null
+  avatar_path: string | null
   created_at: string
 }
 
@@ -51,6 +52,18 @@ export type WorkPost = {
   author_id: string
   content: string
   project_url: string | null
+  project_title: string | null
+  project_description: string | null
+  project_image_url: string | null
+  image_path: string | null
+  created_at: string
+}
+
+export type WorkPostComment = {
+  id: string
+  post_id: string
+  author_id: string
+  content: string
   created_at: string
 }
 
@@ -95,6 +108,16 @@ type Database = {
         Omit<WorkPost, 'id' | 'created_at'> & { id?: string; created_at?: string },
         Partial<Omit<WorkPost, 'id' | 'author_id' | 'created_at'>>
       >
+      work_post_comments: Table<
+        WorkPostComment,
+        Omit<WorkPostComment, 'id' | 'created_at'> & { id?: string; created_at?: string },
+        never
+      >
+      work_post_useful_marks: Table<
+        { post_id: string; user_id: string; created_at: string },
+        { post_id: string; user_id: string; created_at?: string },
+        never
+      >
       professional_connections: Table<
         ProfessionalConnection,
         Omit<ProfessionalConnection, 'id' | 'created_at' | 'updated_at'> & { id?: string; created_at?: string; updated_at?: string },
@@ -108,6 +131,10 @@ type Database = {
       accept_workspace_invitation: { Args: { invitation_token: string }; Returns: string }
       is_workspace_member: { Args: { target_workspace: string }; Returns: boolean }
       shares_workspace_with: { Args: { target_user: string }; Returns: boolean }
+      'link-preview': {
+        Args: { url: string }
+        Returns: { title: string; description: string | null; image_url: string | null; site_name: string | null }
+      }
     }
     Enums: Record<string, never>
     CompositeTypes: Record<string, never>

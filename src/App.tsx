@@ -11,6 +11,7 @@ import {
   BriefcaseBusiness,
   Clock3,
   Flag,
+  House,
   LayoutGrid,
   ListTodo,
   LoaderCircle,
@@ -27,7 +28,7 @@ import {
 } from 'lucide-react'
 import { getSupabaseClient, isSupabaseConfigured, supabaseConfigIssue } from './lib/supabase'
 import type { Task, TaskPriority, TaskStatus, Workspace, WorkspaceInvitation, WorkspaceMember } from './lib/types'
-import ProfessionalNetwork from './ProfessionalNetwork'
+import SocialNetwork from './SocialNetwork'
 import './App.css'
 
 type Filter = 'all' | 'mine' | 'today' | 'upcoming' | 'completed'
@@ -78,7 +79,7 @@ function App() {
   const [loading, setLoading] = useState(false)
   const [workspaceList, setWorkspaceList] = useState<Workspace[]>([])
   const [workspaceId, setWorkspaceId] = useState('')
-  const [activeArea, setActiveArea] = useState<Area>('tasks')
+  const [activeArea, setActiveArea] = useState<Area>('network')
   const [workspaceName, setWorkspaceName] = useState('')
   const [newWorkspaceName, setNewWorkspaceName] = useState('')
   const [tasks, setTasks] = useState<Task[]>([])
@@ -114,7 +115,7 @@ function App() {
     if (ids.length === 0) {
       setWorkspaceList([])
       setWorkspaceId('')
-      setActiveArea('tasks')
+      setActiveArea('network')
       setWorkspaceName('')
       return
     }
@@ -192,8 +193,9 @@ function App() {
       setAuthReady(true)
     })
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, nextSession) => {
       setSession(nextSession)
+      if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') setActiveArea('network')
       setError('')
       setAuthMessage('')
       setWorkspaceList([])
@@ -351,6 +353,7 @@ function App() {
       setNewWorkspaceName('')
       await loadWorkspaces()
       setWorkspaceId(data)
+      setActiveArea('network')
     } catch (createError) {
       setError(`Could not create the board: ${(createError as Error).message}`)
     } finally {
@@ -514,7 +517,7 @@ function App() {
               <button className="quiet-button" onClick={signOut}><LogOut size={16} /> Sign out</button>
             </div>
           </header>
-          <ProfessionalNetwork key={user.id} supabase={supabase!} user={user} />
+          <SocialNetwork key={user.id} supabase={supabase!} user={user} />
         </main>
       )
     }
@@ -552,7 +555,10 @@ function App() {
           )}
         </div>
         <span className="sidebar-label">YOUR SPACE</span>
-        <nav className="sidebar-nav" aria-label="Task filters and professional network">
+        <nav className="sidebar-nav" aria-label="Home feed and task filters">
+          <button className={`sidebar-link ${activeArea === 'network' ? 'sidebar-link-active' : ''}`} onClick={() => setActiveArea('network')} aria-label="Home feed" aria-current={activeArea === 'network' ? 'page' : undefined}>
+            <House size={18} strokeWidth={1.8} /><span>Home feed</span>
+          </button>
           {filters.map(({ id, label, icon: Icon }) => (
             <button className={`sidebar-link ${activeArea === 'tasks' && filter === id ? 'sidebar-link-active' : ''}`} key={id} onClick={() => { setActiveArea('tasks'); setFilter(id) }} aria-label={label} aria-current={activeArea === 'tasks' && filter === id ? 'page' : undefined}>
               <Icon size={18} strokeWidth={1.8} /><span>{label}</span>
@@ -560,9 +566,6 @@ function App() {
               {id === 'completed' && <small className="nav-count">{completeCount}</small>}
             </button>
           ))}
-          <button className={`sidebar-link ${activeArea === 'network' ? 'sidebar-link-active' : ''}`} onClick={() => setActiveArea('network')} aria-label="Professional network" aria-current={activeArea === 'network' ? 'page' : undefined}>
-            <BriefcaseBusiness size={18} strokeWidth={1.8} /><span>Professional network</span>
-          </button>
         </nav>
         <button className="invite-sidebar" onClick={() => setShowInvite(true)}><MailPlus size={17} /> Invite a teammate</button>
         <div className="sidebar-bottom">
@@ -582,7 +585,7 @@ function App() {
       <main className="main-panel">
         <header className="topbar">
           <div className="mobile-brand"><Brand /></div>
-          <div className="breadcrumb"><span>{activeArea === 'network' ? 'ToDoo community' : workspaceName || 'Your board'}</span><span className="breadcrumb-slash">/</span><strong>{activeArea === 'network' ? 'Professional network' : filters.find((item) => item.id === filter)?.label}</strong></div>
+          <div className="breadcrumb"><span>{activeArea === 'network' ? 'ToDoo community' : workspaceName || 'Your board'}</span><span className="breadcrumb-slash">/</span><strong>{activeArea === 'network' ? 'Home feed' : filters.find((item) => item.id === filter)?.label}</strong></div>
           <div className="topbar-actions">
             {activeArea === 'tasks' && <><span className={`live-indicator ${realtimeConnected ? 'live-indicator-on' : ''}`}><i />{realtimeConnected ? 'Live' : 'Connecting'}</span><button className="member-pill" onClick={() => setShowInvite(true)}><Users size={15} /><span>{members.length}</span><Plus size={15} /></button></>}
             <button className="topbar-avatar" aria-label="Account settings">{initials(user.user_metadata.display_name ?? user.email ?? 'You')}</button>
@@ -590,7 +593,7 @@ function App() {
         </header>
 
         {activeArea === 'network' ? (
-          <ProfessionalNetwork key={user.id} supabase={supabase!} user={user} />
+          <SocialNetwork key={user.id} supabase={supabase!} user={user} />
         ) : <section className="board-content">
           <div className="board-heading">
             <div className="board-heading-copy">
