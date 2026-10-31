@@ -5,12 +5,15 @@ import {
   BriefcaseBusiness,
   Check,
   Clock3,
+  Compass,
   ExternalLink,
   Globe2,
+  House,
   ImagePlus,
   MapPin,
   MessageCircle,
   Pencil,
+  Plus,
   Search,
   Send,
   Sparkles,
@@ -20,9 +23,9 @@ import {
   X,
 } from 'lucide-react'
 import type { SupabaseClient } from '@supabase/supabase-js'
-import type { BirthdayVisibility, Database, PrivateProfileDetails, ProfessionalConnection, ProfessionalProfile, PublicProfileDetails, WorkPost, WorkPostComment } from './lib/types'
+import type { BirthdayVisibility, Database, DirectMessage, DirectMessageRequest, PrivateProfileDetails, ProfessionalConnection, ProfessionalProfile, PublicProfileDetails, WorkPost, WorkPostComment } from './lib/types'
 
-export type NetworkTab = 'feed' | 'people' | 'profile'
+export type NetworkTab = 'feed' | 'people' | 'profile' | 'messages'
 
 type Props = {
   supabase: SupabaseClient<Database>
@@ -149,6 +152,8 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
   const [posts, setPosts] = useState<FeedPost[]>([])
   const [comments, setComments] = useState<FeedComment[]>([])
   const [connections, setConnections] = useState<ProfessionalConnection[]>([])
+  const [messageRequests, setMessageRequests] = useState<DirectMessageRequest[]>([])
+  const [directMessages, setDirectMessages] = useState<DirectMessage[]>([])
   const [usefulPostIds, setUsefulPostIds] = useState<Set<string>>(new Set())
   const [imageUrls, setImageUrls] = useState<Record<string, string>>({})
   const [postText, setPostText] = useState('')
@@ -173,18 +178,27 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
   const [openCommentPosts, setOpenCommentPosts] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [composerOpen, setComposerOpen] = useState(false)
+  const [messageRequestRecipientId, setMessageRequestRecipientId] = useState<string | null>(null)
+  const [messageRequestDraft, setMessageRequestDraft] = useState('')
+  const [messageDraft, setMessageDraft] = useState('')
+  const [selectedChatUserId, setSelectedChatUserId] = useState<string | null>(null)
+  const [sendingMessage, setSendingMessage] = useState(false)
+  const chatHistoryRef = useRef<HTMLDivElement>(null)
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const initializedProfileId = useRef<string | null>(null)
 
   const loadNetwork = useCallback(async () => {
-    const [profileResult, profilesResult, postsResult, connectionsResult, privateDetailsResult, publicDetailsResult] = await Promise.all([
+    const [profileResult, profilesResult, postsResult, connectionsResult, privateDetailsResult, publicDetailsResult, requestsResult, messagesResult] = await Promise.all([
       supabase.from('profiles').select('*').eq('user_id', user.id).single(),
       supabase.from('profiles').select('*').order('display_name').limit(100),
       supabase.from('work_posts').select('*').order('created_at', { ascending: false }).limit(50),
       supabase.from('professional_connections').select('*').or(`requester_id.eq.${user.id},addressee_id.eq.${user.id}`).order('created_at', { ascending: false }),
       supabase.from('private_profile_details').select('*').eq('user_id', user.id).maybeSingle(),
       supabase.rpc('get_public_profile_details'),
+      supabase.from('direct_message_requests').select('*').or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`).order('created_at', { ascending: false }).limit(500),
+      supabase.from('direct_messages').select('*').or(`sender_id.eq.${user.id},recipient_id.eq.${user.id}`).order('created_at', { ascending: false }).limit(1000),
     ])
     if (profileResult.error) throw profileResult.error
     if (profilesResult.error) throw profilesResult.error
@@ -192,6 +206,8 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
     if (connectionsResult.error) throw connectionsResult.error
     if (privateDetailsResult.error) throw privateDetailsResult.error
     if (publicDetailsResult.error) throw publicDetailsResult.error
+    if (requestsResult.error) throw requestsResult.error
+    if (messagesResult.error) throw messagesResult.error
     onAvatarPathChange(profileResult.data.avatar_path)
 
     const postIds = postsResult.data.map((post) => post.id)
@@ -207,6 +223,9 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
     const authorIds = [
       ...postsResult.data.map((post) => post.author_id),
       ...commentsResult.data.map((comment) => comment.author_id),
+      ...connectionsResult.data.flatMap((connection) => [connection.requester_id, connection.addressee_id]),
+      ...requestsResult.data.flatMap((request) => [request.sender_id, request.recipient_id]),
+      ...messagesResult.data.flatMap((message) => [message.sender_id, message.recipient_id]),
     ]
     const missingAuthorIds = [...new Set(authorIds)].filter((id) => !profilesResult.data.some((person) => person.user_id === id))
     const missingAuthorsResult = missingAuthorIds.length
@@ -246,6 +265,8 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
     setProfiles(people)
     setImageUrls(imageMap)
     setConnections(connectionsResult.data)
+    setMessageRequests(requestsResult.data)
+    setDirectMessages(messagesResult.data)
     setPosts(postsResult.data.flatMap((post) => {
       const author = byId.get(post.author_id)
       return author ? [{ ...post, author, imageUrl: post.image_path ? imageMap[post.image_path] ?? null : null }] : []
@@ -286,6 +307,12 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
       .on('postgres_changes', { event: '*', schema: 'public', table: 'professional_connections' }, () => {
         void loadNetwork().catch((loadError: Error) => setError(`Could not refresh connections: ${loadError.message}`))
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'direct_message_requests' }, () => {
+        void loadNetwork().catch((loadError: Error) => setError(`Could not refresh message requests: ${loadError.message}`))
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'direct_messages' }, () => {
+        void loadNetwork().catch((loadError: Error) => setError(`Could not refresh messages: ${loadError.message}`))
+      })
       .subscribe()
     return () => { void supabase.removeChannel(channel) }
   }, [supabase, user.id, loadNetwork])
@@ -322,6 +349,26 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
     }
   }, [projectUrl, previewStatus, supabase])
 
+  useEffect(() => {
+    if (tab !== 'messages' || !selectedChatUserId) return
+    const unreadIds = directMessages
+      .filter((message) => message.sender_id === selectedChatUserId && message.recipient_id === user.id && !message.read_at)
+      .map((message) => message.id)
+    if (!unreadIds.length) return
+    const readAt = new Date().toISOString()
+    void supabase.from('direct_messages')
+      .update({ read_at: readAt })
+      .in('id', unreadIds)
+      .eq('recipient_id', user.id)
+      .then(({ error: readError }) => {
+        if (readError) {
+          setError(`Could not mark messages as read: ${readError.message}`)
+          return
+        }
+        setDirectMessages((current) => current.map((message) => unreadIds.includes(message.id) ? { ...message, read_at: readAt } : message))
+      })
+  }, [directMessages, selectedChatUserId, supabase, tab, user.id])
+
   const connectionByPerson = useMemo(() => {
     const index = new Map<string, ProfessionalConnection>()
     for (const connection of connections) {
@@ -330,7 +377,47 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
     return index
   }, [connections, user.id])
   const incoming = connections.filter((connection) => connection.addressee_id === user.id && connection.status === 'pending')
+  const incomingMessageRequests = messageRequests.filter((request) => request.recipient_id === user.id && request.status === 'pending')
+  const outgoingMessageRequests = messageRequests.filter((request) => request.sender_id === user.id && request.status === 'pending')
   const connectionCount = connections.filter((connection) => connection.status === 'accepted').length
+  const messageContacts = (() => {
+    const contactIds = new Set<string>()
+    for (const connection of connections) {
+      if (connection.status === 'accepted') contactIds.add(connection.requester_id === user.id ? connection.addressee_id : connection.requester_id)
+    }
+    for (const request of messageRequests) {
+      if (request.status === 'accepted') contactIds.add(request.sender_id === user.id ? request.recipient_id : request.sender_id)
+    }
+    const latestActivity = new Map<string, string>()
+    for (const message of directMessages) {
+      const peerId = message.sender_id === user.id ? message.recipient_id : message.sender_id
+      latestActivity.set(peerId, message.created_at > (latestActivity.get(peerId) ?? '') ? message.created_at : latestActivity.get(peerId) ?? '')
+    }
+    for (const request of messageRequests) {
+      if (request.status !== 'accepted') continue
+      const peerId = request.sender_id === user.id ? request.recipient_id : request.sender_id
+      latestActivity.set(peerId, request.created_at > (latestActivity.get(peerId) ?? '') ? request.created_at : latestActivity.get(peerId) ?? '')
+    }
+    return profiles.filter((person) => contactIds.has(person.user_id))
+      .sort((first, second) => (latestActivity.get(second.user_id) ?? '').localeCompare(latestActivity.get(first.user_id) ?? '')
+        || first.display_name.localeCompare(second.display_name))
+  })()
+  const selectedChatPerson = messageContacts.find((person) => person.user_id === selectedChatUserId) ?? null
+  const messageRequestRecipient = profiles.find((person) => person.user_id === messageRequestRecipientId) ?? null
+  const chatMessages = useMemo(() => directMessages
+    .filter((message) => (message.sender_id === selectedChatUserId && message.recipient_id === user.id)
+      || (message.sender_id === user.id && message.recipient_id === selectedChatUserId))
+    .sort((first, second) => first.created_at.localeCompare(second.created_at)),
+  [directMessages, selectedChatUserId, user.id])
+  const unreadMessageCount = directMessages.filter((message) => message.recipient_id === user.id && !message.read_at).length
+  useEffect(() => {
+    const history = chatHistoryRef.current
+    if (!history) return
+    history.scrollTo({
+      top: history.scrollHeight,
+      behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+    })
+  }, [chatMessages, selectedChatUserId])
   const recentActivityByPerson = useMemo(() => {
     const activity = new Map(profiles.map((person) => [person.user_id, person.created_at]))
     for (const post of posts) {
@@ -372,6 +459,13 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
     }
     return index
   }, [comments])
+  const sectionHeading = tab === 'feed'
+    ? ['Home', 'Your professional feed, with people and work worth following.']
+    : tab === 'people'
+      ? ['Discover', 'Find people, explore their work, and start a conversation.']
+      : tab === 'profile'
+        ? ['My profile', 'Your professional identity and public introduction.']
+        : ['Messages', 'Real conversations with your ToDoo community.']
 
   const chooseImage = (file: File | undefined, maximumBytes: number, kind: string) => {
     if (!file) return null
@@ -465,6 +559,8 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
       postImagePreviewRef.current = null
       setPostImagePreviewUrl(null)
       setPostImage(null)
+      setComposerOpen(false)
+      onTabChange('feed')
       await loadNetwork().catch((loadError: Error) => setError(`Your post was published, but the feed could not refresh: ${loadError.message}`))
     } catch (saveError) {
       if (uploadedPath) {
@@ -479,6 +575,82 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
     } finally {
       setSaving(false)
     }
+  }
+
+  const openChat = (personId: string) => {
+    setSelectedChatUserId(personId)
+    setMessageDraft('')
+    onTabChange('messages')
+  }
+
+  const startMessage = (personId: string) => {
+    if (connectionByPerson.get(personId)?.status === 'accepted'
+      || messageRequests.some((request) => request.status === 'accepted'
+        && (request.sender_id === personId && request.recipient_id === user.id
+          || request.sender_id === user.id && request.recipient_id === personId))) {
+      openChat(personId)
+      return
+    }
+    setMessageRequestRecipientId(personId)
+    setMessageRequestDraft('')
+  }
+
+  const sendMessageRequest = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!messageRequestRecipientId || !messageRequestDraft.trim()) return
+    setError('')
+    setNotice('')
+    const { error: requestError } = await supabase.from('direct_message_requests').insert({
+      sender_id: user.id,
+      recipient_id: messageRequestRecipientId,
+      initial_message: messageRequestDraft.trim(),
+      status: 'pending',
+    })
+    if (requestError) {
+      setError(requestError.code === '23505'
+        ? 'There is already a pending message request between you and this member.'
+        : `Could not send your message request: ${requestError.message}`)
+      return
+    }
+    setMessageRequestRecipientId(null)
+    setMessageRequestDraft('')
+    setNotice('Message request sent. You can chat when they accept.')
+    await loadNetwork().catch((loadError: Error) => setError(`Request sent, but your inbox could not refresh: ${loadError.message}`))
+  }
+
+  const respondToMessageRequest = async (request: DirectMessageRequest, accept: boolean) => {
+    const { error: responseError } = await supabase.from('direct_message_requests')
+      .update({ status: accept ? 'accepted' : 'declined' })
+      .eq('id', request.id)
+      .eq('recipient_id', user.id)
+    if (responseError) {
+      setError(`Could not ${accept ? 'accept' : 'decline'} the message request: ${responseError.message}`)
+      return
+    }
+    if (accept) openChat(request.sender_id)
+    setNotice(accept ? 'Message request accepted. You can now chat.' : 'Message request declined.')
+    await loadNetwork().catch((loadError: Error) => setError(`Your response was saved, but your inbox could not refresh: ${loadError.message}`))
+  }
+
+  const sendDirectMessage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    const content = messageDraft.trim()
+    if (!selectedChatUserId || !content || sendingMessage) return
+    setSendingMessage(true)
+    setError('')
+    const { error: sendError } = await supabase.from('direct_messages').insert({
+      sender_id: user.id,
+      recipient_id: selectedChatUserId,
+      content,
+    })
+    if (sendError) {
+      setError(`Could not send your message: ${sendError.message}`)
+      setSendingMessage(false)
+      return
+    }
+    setMessageDraft('')
+    await loadNetwork().catch((loadError: Error) => setError(`Message sent, but your inbox could not refresh: ${loadError.message}`))
+    setSendingMessage(false)
   }
 
   const saveProfile = async (event: FormEvent<HTMLFormElement>) => {
@@ -710,31 +882,35 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
       <header className="network-heading">
         <div>
           <p className="eyebrow"><Sparkles size={13} /> Ideas, work, community</p>
-          <h1>Your corner of the professional world.</h1>
-          <p className="board-subtitle">A place to share what you’re making and meet people who care about the same things.</p>
+          <h1>{sectionHeading[0]}</h1>
+          <p className="board-subtitle">{sectionHeading[1]}</p>
         </div>
-        <div className="network-stat"><Users size={17} /><strong>{connectionCount}</strong><span>connections</span></div>
+        <div className="network-heading-actions">
+          <div className="network-stat"><Users size={17} /><strong>{connectionCount}</strong><span>connections</span></div>
+          <button className="network-create-button" onClick={() => setComposerOpen(true)} aria-label="Create a new post"><Plus size={19} /><span>Create post</span></button>
+        </div>
       </header>
 
       <nav className="network-tabs" aria-label="Social network sections">
-        <button className={tab === 'feed' ? 'network-tab-active' : ''} onClick={() => onTabChange('feed')}>Home feed</button>
-        <button className={tab === 'people' ? 'network-tab-active' : ''} onClick={() => onTabChange('people')}>Discover{incoming.length > 0 && <span className="network-tab-count">{incoming.length}</span>}</button>
-        <button className={tab === 'profile' ? 'network-tab-active' : ''} onClick={() => onTabChange('profile')}>My profile</button>
+        <button className={tab === 'feed' ? 'network-tab-active' : ''} onClick={() => onTabChange('feed')} aria-current={tab === 'feed' ? 'page' : undefined}><House size={16} /> Home</button>
+        <button className={tab === 'people' ? 'network-tab-active' : ''} onClick={() => onTabChange('people')} aria-current={tab === 'people' ? 'page' : undefined}><Compass size={16} /> Discover{incoming.length > 0 && <span className="network-tab-count">{incoming.length}</span>}</button>
+        <button className={tab === 'profile' ? 'network-tab-active' : ''} onClick={() => onTabChange('profile')} aria-current={tab === 'profile' ? 'page' : undefined}><Avatar name={profile?.display_name ?? fallbackName} imageUrl={profile?.avatar_path ? imageUrls[profile.avatar_path] ?? null : null} size="network-avatar-nav" /> My profile</button>
+        <button className={tab === 'messages' ? 'network-tab-active' : ''} onClick={() => onTabChange('messages')} aria-current={tab === 'messages' ? 'page' : undefined}><MessageCircle size={16} /> Messages{unreadMessageCount + incomingMessageRequests.length > 0 && <span className="network-tab-count">{unreadMessageCount + incomingMessageRequests.length > 99 ? '99+' : unreadMessageCount + incomingMessageRequests.length}</span>}</button>
       </nav>
 
-      {error && <div className="network-alert network-alert-error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
+      {error && !composerOpen && !messageRequestRecipient && <div className="network-alert network-alert-error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
       {notice && <div className="network-alert network-alert-success" role="status">{notice}<button onClick={() => setNotice('')} aria-label="Dismiss message"><X size={15} /></button></div>}
 
-      {loading ? (
-        <div className="network-empty"><span className="network-avatar"><Users size={20} /></span><p>Loading your home feed…</p></div>
-      ) : tab === 'feed' ? (
-        <div className="network-feed-layout">
-          <div className="network-feed-main">
+      {composerOpen && (
+        <div className="network-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setComposerOpen(false) }}>
+          <section className="network-compose-modal" role="dialog" aria-modal="true" aria-labelledby="create-post-title">
+            <header><div><p className="eyebrow">Share with your network</p><h2 id="create-post-title">Create a post</h2></div><button className="network-modal-close" onClick={() => setComposerOpen(false)} aria-label="Close post composer"><X size={18} /></button></header>
+            {error && <div className="network-alert network-alert-error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
             <form className="network-compose" onSubmit={createPost}>
               <div className="network-compose-top">
                 <Avatar name={profile?.display_name ?? fallbackName} imageUrl={profile?.avatar_path ? imageUrls[profile.avatar_path] ?? null : null} />
                 <label className="sr-only" htmlFor="work-post">Share a work update</label>
-                <textarea id="work-post" value={postText} onChange={(event) => setPostText(event.target.value)} maxLength={2000} placeholder="Share an idea, project, or small win…" required />
+                <textarea id="work-post" autoFocus value={postText} onChange={(event) => setPostText(event.target.value)} maxLength={2000} placeholder="Share an idea, project, or small win…" required />
               </div>
               <div className="network-compose-bottom">
                 <label className="network-link-input"><Globe2 size={15} /><span className="sr-only">Project or portfolio link</span><input type="url" value={projectUrl} onChange={(event) => updateProjectUrl(event.target.value)} maxLength={2048} placeholder="Add a link (optional)" /></label>
@@ -742,7 +918,6 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
                   <ImagePlus size={15} /><span>{postImage ? 'Change image' : 'Add one image'}</span>
                   <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => updatePostImage(event.currentTarget.files?.[0])} />
                 </label>
-                <button className="primary-button" disabled={saving || !postText.trim() || previewStatus === 'loading'}>{saving ? 'Sharing…' : <><Send size={14} /> Share work</>}</button>
               </div>
               {postImagePreviewUrl && (
                 <div className="network-compose-image-preview">
@@ -752,12 +927,34 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
               )}
               {projectUrl.trim() && previewStatus === 'loading' && <p className="network-preview-status" role="status">Creating a secure link preview…</p>}
               {previewStatus === 'error' && <p className="network-preview-status network-preview-error" role="status">{previewMessage}</p>}
-              {previewStatus === 'ready' && preview && (
-                <LinkPreviewCard href={preview.url} title={preview.title} description={preview.description} imageUrl={preview.image_url} siteName={preview.site_name} />
-              )}
-              <small className="network-compose-note">Visible to signed-in ToDoo members · one image, up to 5 MB · {postText.length}/2000</small>
+              {previewStatus === 'ready' && preview && <LinkPreviewCard href={preview.url} title={preview.title} description={preview.description} imageUrl={preview.image_url} siteName={preview.site_name} />}
+              <div className="network-compose-modal-footer"><small>One image, up to 5 MB · {postText.length}/2000</small><button className="primary-button" disabled={saving || !postText.trim() || previewStatus === 'loading'}>{saving ? 'Sharing…' : <><Send size={14} /> Share work</>}</button></div>
             </form>
+          </section>
+        </div>
+      )}
 
+      {messageRequestRecipient && (
+        <div className="network-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setMessageRequestRecipientId(null) }}>
+          <section className="network-compose-modal network-message-request-modal" role="dialog" aria-modal="true" aria-labelledby="message-request-title">
+            <header><div><p className="eyebrow">Start a conversation</p><h2 id="message-request-title">Message {messageRequestRecipient.display_name}</h2></div><button className="network-modal-close" onClick={() => setMessageRequestRecipientId(null)} aria-label="Close message request"><X size={18} /></button></header>
+            <p className="network-message-request-note">You are not connected yet. Send a short introduction; they can accept or decline it before you can chat.</p>
+            {error && <div className="network-alert network-alert-error" role="alert">{error}<button onClick={() => setError('')} aria-label="Dismiss error"><X size={15} /></button></div>}
+            <form className="network-request-compose" onSubmit={(event) => void sendMessageRequest(event)}>
+              <label className="sr-only" htmlFor="message-request-draft">Your introduction</label>
+              <textarea id="message-request-draft" autoFocus value={messageRequestDraft} onChange={(event) => setMessageRequestDraft(event.target.value)} maxLength={1000} placeholder="Hi! I saw your work and would love to connect…" required />
+              <small>{messageRequestDraft.length}/1000</small>
+              <button className="primary-button" disabled={!messageRequestDraft.trim()}><Send size={14} /> Send request</button>
+            </form>
+          </section>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="network-empty"><span className="network-avatar"><Users size={20} /></span><p>Loading your home feed…</p></div>
+      ) : tab === 'feed' ? (
+        <div className="network-feed-layout">
+          <div className="network-feed-main">
             {recommendedPosts.length ? recommendedPosts.map((post) => {
               const postComments = commentsByPost.get(post.id) ?? []
               const authorConnected = connectionByPerson.get(post.author_id)?.status === 'accepted'
@@ -863,6 +1060,9 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
             {visiblePeople.map((person) => {
               const connection = connectionByPerson.get(person.user_id)
               const incomingRequest = connection?.status === 'pending' && connection.addressee_id === user.id
+              const messageRequest = messageRequests.find((request) => request.status === 'pending'
+                && ((request.sender_id === user.id && request.recipient_id === person.user_id)
+                  || (request.sender_id === person.user_id && request.recipient_id === user.id)))
               const interests = sharedInterestCount(profile, person)
               const details = publicDetails[person.user_id]
               return (
@@ -880,11 +1080,104 @@ export default function SocialNetwork({ supabase, user, tab, onTabChange, onAvat
                       : connection?.status === 'pending'
                         ? <span className="network-pending"><Clock3 size={13} /> Pending</span>
                         : <button className="network-connect-button" onClick={() => void sendRequest(person.user_id)}><UserRoundPlus size={14} /> Connect</button>}
+                  {messageRequest?.recipient_id === user.id
+                    ? <button className="network-message-button" onClick={() => onTabChange('messages')}><MessageCircle size={14} /> Review request</button>
+                    : messageRequest
+                      ? <button className="network-message-button" disabled><Clock3 size={13} /> Request sent</button>
+                      : <button className="network-message-button" onClick={() => startMessage(person.user_id)}><MessageCircle size={14} /> Message</button>}
                 </article>
               )
             })}
             {visiblePeople.length === 0 && <div className="network-empty"><h2>No professionals found.</h2><p>Try a different name, role, or location.</p></div>}
           </div>
+        </div>
+      ) : tab === 'messages' ? (
+        <div className="network-messages-layout">
+          <aside className="network-inbox">
+            <header><div><h2>Inbox</h2><p>Private chats and message requests</p></div><span className="network-inbox-total">{messageContacts.length}</span></header>
+            {incomingMessageRequests.length > 0 && (
+              <section className="network-inbox-requests">
+                <h3>Message requests <span>{incomingMessageRequests.length}</span></h3>
+                {incomingMessageRequests.map((request) => {
+                  const person = profiles.find((item) => item.user_id === request.sender_id)
+                  if (!person) return null
+                  return (
+                    <article className="network-inbox-request" key={request.id}>
+                      <Avatar name={person.display_name} imageUrl={person.avatar_path ? imageUrls[person.avatar_path] ?? null : null} size="network-avatar-small" />
+                      <div><strong>{person.display_name}</strong><p>{request.initial_message}</p></div>
+                      <div className="network-request-actions">
+                        <button className="network-request-accept" onClick={() => void respondToMessageRequest(request, true)} aria-label={`Accept message request from ${person.display_name}`}><Check size={14} /></button>
+                        <button className="network-request-decline" onClick={() => void respondToMessageRequest(request, false)} aria-label={`Decline message request from ${person.display_name}`}><X size={14} /></button>
+                      </div>
+                    </article>
+                  )
+                })}
+              </section>
+            )}
+            {outgoingMessageRequests.length > 0 && (
+              <section className="network-inbox-sent">
+                <h3>Sent requests</h3>
+                {outgoingMessageRequests.map((request) => {
+                  const person = profiles.find((item) => item.user_id === request.recipient_id)
+                  return person ? <p key={request.id}><Clock3 size={13} /> Waiting for {person.display_name}</p> : null
+                })}
+              </section>
+            )}
+            <div className="network-inbox-list">
+              {messageContacts.map((person) => {
+                const latestMessage = directMessages.find((message) => message.sender_id === person.user_id && message.recipient_id === user.id
+                  || message.sender_id === user.id && message.recipient_id === person.user_id)
+                const unread = directMessages.filter((message) => message.sender_id === person.user_id && message.recipient_id === user.id && !message.read_at).length
+                return (
+                  <button className={`network-inbox-person ${person.user_id === selectedChatUserId ? 'network-inbox-person-active' : ''}`} key={person.user_id} onClick={() => openChat(person.user_id)}>
+                    <Avatar name={person.display_name} imageUrl={person.avatar_path ? imageUrls[person.avatar_path] ?? null : null} />
+                    <span><strong>{person.display_name}</strong><small>{latestMessage?.content ?? 'You are connected. Say hello!'}</small></span>
+                    <span className="network-inbox-meta">{latestMessage && <time>{timeAgo(latestMessage.created_at)}</time>}{unread > 0 && <b>{unread}</b>}</span>
+                  </button>
+                )
+              })}
+              {messageContacts.length === 0 && incomingMessageRequests.length === 0 && (
+                <div className="network-inbox-empty"><MessageCircle size={19} /><p>Your chats will show up here.</p><button onClick={() => onTabChange('people')}>Discover people</button></div>
+              )}
+            </div>
+          </aside>
+          <section className="network-chat-panel" aria-label="Conversation">
+            {selectedChatPerson ? (
+              <>
+                <header className="network-chat-header">
+                  <Avatar name={selectedChatPerson.display_name} imageUrl={selectedChatPerson.avatar_path ? imageUrls[selectedChatPerson.avatar_path] ?? null : null} />
+                  <div><strong>{selectedChatPerson.display_name}</strong><small>{selectedChatPerson.headline || 'ToDoo member'}</small></div>
+                  <span className="network-chat-online"><i /> ToDoo member</span>
+                </header>
+                <div ref={chatHistoryRef} className="network-chat-history" aria-live="polite">
+                  {messageRequests.filter((request) => request.status === 'accepted'
+                    && (request.sender_id === selectedChatPerson.user_id && request.recipient_id === user.id
+                      || request.sender_id === user.id && request.recipient_id === selectedChatPerson.user_id))
+                    .map((request) => (
+                      <article className={`network-chat-message ${request.sender_id === user.id ? 'network-chat-message-mine' : ''}`} key={`request-${request.id}`}>
+                        <p>{request.initial_message}</p><small>{timeAgo(request.created_at)} · Message request</small>
+                      </article>
+                    ))}
+                  {chatMessages.map((message) => (
+                    <article className={`network-chat-message ${message.sender_id === user.id ? 'network-chat-message-mine' : ''}`} key={message.id}>
+                      <p>{message.content}</p><small>{timeAgo(message.created_at)}{message.sender_id === user.id && message.read_at ? ' · Seen' : ''}</small>
+                    </article>
+                  ))}
+                  {chatMessages.length === 0 && !messageRequests.some((request) => request.status === 'accepted'
+                    && (request.sender_id === selectedChatPerson.user_id && request.recipient_id === user.id
+                      || request.sender_id === user.id && request.recipient_id === selectedChatPerson.user_id))
+                    && <p className="network-chat-start">You’re connected. Send a thoughtful hello to get the conversation started.</p>}
+                </div>
+                <form className="network-chat-form" onSubmit={(event) => void sendDirectMessage(event)}>
+                  <label className="sr-only" htmlFor="direct-message">Write a message</label>
+                  <textarea id="direct-message" value={messageDraft} onChange={(event) => setMessageDraft(event.target.value)} maxLength={2000} rows={1} placeholder={`Message ${selectedChatPerson.display_name}…`} required />
+                  <button className="primary-button" disabled={!messageDraft.trim() || sendingMessage} aria-label="Send message">{sendingMessage ? <Clock3 size={16} /> : <Send size={16} />}</button>
+                </form>
+              </>
+            ) : (
+              <div className="network-chat-placeholder"><span><MessageCircle size={23} /></span><h2>Your conversations</h2><p>Select a chat or discover someone new to say hello.</p><button className="network-discover-link" onClick={() => onTabChange('people')}><Compass size={14} /> Discover people</button></div>
+            )}
+          </section>
         </div>
       ) : (
         <form className="network-profile-form" onSubmit={saveProfile}>

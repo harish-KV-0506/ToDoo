@@ -93,6 +93,24 @@ export type ProfessionalConnection = {
   updated_at: string
 }
 
+export type DirectMessageRequest = {
+  id: string
+  sender_id: string
+  recipient_id: string
+  initial_message: string
+  status: 'pending' | 'accepted' | 'declined'
+  created_at: string
+}
+
+export type DirectMessage = {
+  id: string
+  sender_id: string
+  recipient_id: string
+  content: string
+  created_at: string
+  read_at: string | null
+}
+
 export type GameGenre = 'arcade' | 'puzzle' | 'platformer' | 'strategy' | 'other'
 
 export type CommunityGame = {
@@ -163,6 +181,16 @@ type Database = {
         ProfessionalConnection,
         Omit<ProfessionalConnection, 'id' | 'created_at' | 'updated_at'> & { id?: string; created_at?: string; updated_at?: string },
         Partial<Pick<ProfessionalConnection, 'status'>>
+      >
+      direct_message_requests: Table<
+        DirectMessageRequest,
+        Omit<DirectMessageRequest, 'id' | 'created_at'> & { id?: string; created_at?: string },
+        Partial<Pick<DirectMessageRequest, 'status'>>
+      >
+      direct_messages: Table<
+        DirectMessage,
+        Omit<DirectMessage, 'id' | 'created_at' | 'read_at'> & { id?: string; created_at?: string; read_at?: string | null },
+        Partial<Pick<DirectMessage, 'read_at'>>
       >
       community_games: Table<
         CommunityGame,
